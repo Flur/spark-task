@@ -6,19 +6,6 @@ import org.apache.spark.sql.types.{DataType, DataTypes, DateType, DoubleType, In
 import org.apache.spark.sql.functions
 import org.apache.spark.sql.functions.{explode, hour, lit, round, to_date, to_timestamp}
 
-
-case class ExchangeRate(date: String, currency: String, iso: String, rate: Float)
-
-
-// todo rename to bind
-case class Test(
-                 MotelID: Int,
-                 BidDate: String,
-                 US: Double,
-                 MX: Double,
-                 CA: Double,
-               )
-
 object Main {
 
   val sc: SparkSession = SparkSession.builder
@@ -38,7 +25,7 @@ object Main {
     bidsWithUsd
       .join(motels, $"MotelID" === $"id")
       .groupBy($"MotelID", $"MotelName", $"date", $"Country").agg(functions.max($"Losa").as("Losa"))
-      .show()
+      .explain()
   }
 
   def dealingWithBids(bids: DataFrame, exchangeRateBroadcast: Broadcast[scala.collection.Map[String, Double]]): DataFrame = {
@@ -119,9 +106,7 @@ object Main {
   def clearFromErrors(bids: DataFrame): DataFrame = {
     import sc.implicits._
 
-    val bindsWithData = bids
-
-    var dfWithErrors = bids.filter($"HU".startsWith("ERROR_"))
+    val dfWithErrors = bids.filter($"HU".startsWith("ERROR_"))
     val clearedBids = bids.except(dfWithErrors)
 
     // generate output
@@ -139,10 +124,6 @@ object Main {
     //      .save("BidErrors.csv")
 
     clearedBids
-  }
-
-  def convertFromUsdToEur(): Unit = {
-
   }
 
   def readExchangeRate(sc: SparkSession, filePath: String): DataFrame = {
