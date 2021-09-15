@@ -8,7 +8,7 @@ import org.apache.spark.sql.types.{DoubleType, IntegerType, StringType, StructTy
 object Main {
 
   val sc: SparkSession = SparkSession.builder
-    .master("local")
+    //    .master("local")
     .appName("Hotel Bids")
     .getOrCreate()
 
@@ -70,7 +70,7 @@ object Main {
 
     val exchangeRate = readExchangeRate(sc)
 
-   exchangeRate
+    exchangeRate
       .select($"ValidFrom", $"ExchangeRate")
   }
 
@@ -95,8 +95,8 @@ object Main {
       .format("csv")
       .options(Map("delimiter" -> ",", "header" -> "false"))
       .schema(schema)
-      .csv("src/main/resources/local_smaller/bids.txt")
-    //      .load("hdfs:///tmp/data/bids2.txt")
+      //      .csv("src/main/resources/local_smaller/bids.txt")
+      .load("hdfs:///tmp/data/bids2.txt")
 
     df
   }
@@ -137,8 +137,8 @@ object Main {
       .format("csv")
       .options(Map("delimiter" -> ",", "header" -> "false"))
       .schema(schema)
-      //      .load("hdfs:///tmp/data/exchange_rate.txt")
-      .csv("src/main/resources/local_smaller/exchange_rate.txt")
+      .load("hdfs:///tmp/data/exchange_rate.txt")
+    //      .csv("src/main/resources/local_smaller/exchange_rate.txt")
 
     exchangeRates
   }
@@ -157,8 +157,8 @@ object Main {
       .format("csv")
       .options(Map("delimiter" -> ",", "header" -> "false"))
       .schema(schema)
-      //      .load("hdfs:///tmp/data/motels.txt")
-      .csv("src/main/resources/local_smaller/motels.txt")
+      .load("hdfs:///tmp/data/motels.txt")
+    //      .csv("src/main/resources/local_smaller/motels.txt")
 
     motels
   }
