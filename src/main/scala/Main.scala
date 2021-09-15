@@ -1,23 +1,10 @@
-import org.apache.spark.sql.{DataFrame, Dataset, Encoder, Encoders, Row, SparkSession}
+import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
-import org.apache.spark.sql.types.{DataType, DataTypes, DateType, DoubleType, IntegerType, StringType, StructType, TimestampType}
+import org.apache.spark.sql.types.{DoubleType, IntegerType, StringType, StructType, TimestampType}
 import org.apache.spark.sql.functions
-import org.apache.spark.sql.functions.{explode, hour, lit, round, to_date, to_timestamp}
-
-
-case class ExchangeRate(date: String, currency: String, iso: String, rate: Float)
-
-
-// todo rename to bind
-case class Test(
-                 MotelID: Int,
-                 BidDate: String,
-                 US: Double,
-                 MX: Double,
-                 CA: Double,
-               )
+import org.apache.spark.sql.functions.{explode, hour, lit, round, to_timestamp}
 
 object Main {
 
@@ -131,7 +118,6 @@ object Main {
       .withColumn("hour", hour($"BidDate"))
       .select($"hour", $"error")
       .groupBy($"hour", $"error").count()
-      // todo remove on real spark!!!!
       .repartition(1)
       .write
       .format("csv")
