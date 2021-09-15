@@ -1,10 +1,9 @@
-import org.apache.spark.sql.{DataFrame, Dataset, Encoder, Encoders, Row, SparkSession}
+package dataart
 
-import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
-import org.apache.spark.sql.types.{DataType, DataTypes, DateType, DoubleType, IntegerType, StringType, StructType, TimestampType}
-import org.apache.spark.sql.functions
-import org.apache.spark.sql.functions.{explode, hour, lit, round, to_date, to_timestamp}
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types.{DoubleType, IntegerType, StringType, StructType}
 
 object Main {
 
@@ -18,17 +17,18 @@ object Main {
 
     val bids = prepareBids()
     val exchangeRateBroadcast = prepareExchangeRate()
-    val motels = readMotels(sc, "src/main/resources/local_smaller/motels.txt")
+    val motels = readMotels(sc)
 
     val bidsWithUsd = dealingWithBids(bids, exchangeRateBroadcast)
 
     bidsWithUsd
       .join(motels, $"MotelID" === $"id")
       .groupBy($"MotelID", $"MotelName", $"date", $"Country").agg(functions.max($"Losa").as("Losa"))
-      .explain()
+      .show()
+    //              .explain()
   }
 
-  def dealingWithBids(bids: DataFrame, exchangeRateBroadcast: Broadcast[scala.collection.Map[String, Double]]): DataFrame = {
+  def dealingWithBids(bids: DataFrame, exchangeRateBroadcast: DataFrame): DataFrame = {
     import sc.implicits._
 
     implicit val enco: ExpressionEncoder[Row] = RowEncoder(new StructType()
@@ -39,53 +39,50 @@ object Main {
       .add("CA", DoubleType, nullable = true)
     )
 
-    bids
+    val bidsUpdated = bids
       .na.drop("any", Seq("US", "MX", "CA"))
       .select($"MotelID", $"BidDate", $"US", $"MX", $"CA")
-      .map((r: Row) => {
-        val usdToEurRate: Double = exchangeRateBroadcast.value.get(r.getString(1)) match {
-          case Some(v) => v
-          case None => 1
-        }
 
-        Row(r(0), r(1), r.getDouble(2) * usdToEurRate, r.getDouble(3) * usdToEurRate, r.getDouble(4) * usdToEurRate)
-      })
-      .select($"MotelID", $"BidDate", round($"US", 3).as("US"), round($"MX", 3).as("MX"), round($"CA", 3).as("CA"))
+
+    val bidsWithUSD = bidsUpdated
+      .join(
+        broadcast(exchangeRateBroadcast),
+        bidsUpdated("BidDate") <=> exchangeRateBroadcast("ValidFrom")
+      )
+      .select(
+        $"MotelID",
+        $"BidDate",
+        round(($"US" * $"ExchangeRate"), 3).as("US"),
+        round(($"MX" * $"ExchangeRate"), 3).as("MX"),
+        round(($"CA" * $"ExchangeRate"), 3).as("CA")
+      )
       .select($"MotelID", to_timestamp($"BidDate", "HH-dd-MM-yyyy").as("date"),
         explode(
           functions.map(lit("US"), $"US", lit("MX"), $"MX", lit("CA"), $"CA"))
           .as(Seq("Country", "Losa"))
       )
-    //      .explain()
+
+    bidsWithUSD
   }
 
-  def prepareExchangeRate(): Broadcast[scala.collection.Map[String, Double]] = {
+  def prepareExchangeRate(): DataFrame = {
     import sc.implicits._
 
-    val exchangeRate = readExchangeRate(sc, "src/main/resources/local_smaller/exchange_rate.txt")
+    val exchangeRate = readExchangeRate(sc)
 
-    val exchangeRateMap = exchangeRate
-      .select($"ValidFrom".cast("string"), $"ExchangeRate")
-      .as[(String, Double)]
-      .rdd
-      .collectAsMap
-
-    // 2. Exchange rates
-    val exchangeRateMapBroadcast = sc.sparkContext.broadcast(exchangeRateMap)
-
-    exchangeRateMapBroadcast
+   exchangeRate
+      .select($"ValidFrom", $"ExchangeRate")
   }
 
   def prepareBids(): DataFrame = {
-    val bidsDF = readBids(sc, "src/main/resources/local_smaller/bids.txt")
+    val bidsDF = readBids(sc)
 
     val clearedBidsDF = clearFromErrors(bidsDF)
 
     clearedBidsDF
   }
 
-  def readBids(sc: SparkSession, filePath: String): DataFrame = {
-    import sc.implicits._
+  def readBids(sc: SparkSession): DataFrame = {
 
     var schema = new StructType()
       .add("MotelID", IntegerType, nullable = false)
@@ -95,9 +92,11 @@ object Main {
       .foreach(h => schema = schema.add(h, DoubleType, nullable = true))
 
     val df: Dataset[Row] = sc.read
+      .format("csv")
       .options(Map("delimiter" -> ",", "header" -> "false"))
       .schema(schema)
-      .csv(filePath)
+      .csv("src/main/resources/local_smaller/bids.txt")
+    //      .load("hdfs:///tmp/data/bids2.txt")
 
     df
   }
@@ -116,7 +115,6 @@ object Main {
       .withColumn("hour", hour($"BidDate"))
       .select($"hour", $"error")
       .groupBy($"hour", $"error").count()
-      // todo remove on real spark!!!!
       .repartition(1)
       .write
       .format("csv")
@@ -126,8 +124,7 @@ object Main {
     clearedBids
   }
 
-  def readExchangeRate(sc: SparkSession, filePath: String): DataFrame = {
-    import sc.implicits._
+  def readExchangeRate(sc: SparkSession): DataFrame = {
 
     val schema = new StructType()
       .add("ValidFrom", StringType, nullable = true)
@@ -137,15 +134,16 @@ object Main {
 
     val exchangeRates = sc
       .read
+      .format("csv")
       .options(Map("delimiter" -> ",", "header" -> "false"))
       .schema(schema)
-      .csv(filePath)
+      //      .load("hdfs:///tmp/data/exchange_rate.txt")
+      .csv("src/main/resources/local_smaller/exchange_rate.txt")
 
     exchangeRates
   }
 
-  def readMotels(sc: SparkSession, filePath: String): DataFrame = {
-    import sc.implicits._
+  def readMotels(sc: SparkSession): DataFrame = {
 
     val schema = new StructType()
       .add("id", IntegerType, nullable = false)
@@ -156,11 +154,11 @@ object Main {
 
     val motels = sc
       .read
+      .format("csv")
       .options(Map("delimiter" -> ",", "header" -> "false"))
       .schema(schema)
-      .csv(filePath)
-
-    motels.show()
+      //      .load("hdfs:///tmp/data/motels.txt")
+      .csv("src/main/resources/local_smaller/motels.txt")
 
     motels
   }
